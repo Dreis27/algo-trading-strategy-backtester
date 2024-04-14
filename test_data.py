@@ -33,7 +33,8 @@ test_data['strategy'] = test_data['prediction'] * test_data['returns']
 calculate_position_percentage(test_data, 0, 1.0)
 
 test_data['strategy_returns'] = test_data['returns'] * test_data['current_position_percentage']
-test_cumulative_returns = test_data[['returns', 'strategy_returns']].cumsum().apply(np.exp)
+test_data['strategy_simple_returns'] = np.exp(test_data['strategy_returns']) - 1
+test_cumulative_returns = test_data[['returns', 'strategy_simple_returns']].cumsum().apply(np.exp)
 
 buy_signals = test_data[test_data['prediction'] == 1].index
 sell_signals = test_data[test_data['prediction'] == -1].index
@@ -50,9 +51,9 @@ print(test_data.loc[test_data['prediction']==-1, 'current_position_percentage'])
 plt.figure(figsize=(16, 10))
 test_cumulative_returns.plot(ax=plt.gca())
 
-buy_signal_values = test_cumulative_returns.loc[valid_buy_signals, 'strategy_returns']
+buy_signal_values = test_cumulative_returns.loc[valid_buy_signals, 'strategy_simple_returns']
 plt.scatter(buy_signal_values.index, buy_signal_values, color='green', marker='^', label='Buy Trades', alpha=0.7)
-sell_signal_values = test_cumulative_returns.loc[valid_sell_signals, 'strategy_returns']
+sell_signal_values = test_cumulative_returns.loc[valid_sell_signals, 'strategy_simple_returns']
 plt.scatter(sell_signal_values.index, sell_signal_values, color='red', marker='v', label='Sell Trades', alpha=0.7)
 
 plt.title('Trading Strategy Performance with Trade Signals')
