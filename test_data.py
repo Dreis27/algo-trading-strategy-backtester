@@ -4,9 +4,17 @@ from pylab import mpl, plt
 from backtest import prepare_training_data, add_indicators_to_training_data, calculate_position_percentage
 from keras.models import load_model
 
+"""
+This program applies the trading algorithm (neural network model)
+created in the 'backtest.py' file onto a different dataset.
+
+Here we can validate the model and test its performance with new data.
+
+"""
+
 columns = []
-buy_threshold = 0.8
-sell_threshold = 0.2
+buy_threshold = 0.85
+sell_threshold = 0.15
 
 test_data = prepare_training_data('SOLUSDT-1h-2024-02.csv')
 add_indicators_to_training_data(test_data, columns, 'close')
@@ -22,18 +30,18 @@ test_predictions_series = pd.Series(test_predict.flatten(), index=test_data.inde
 test_data['prediction'] = np.where(test_predict > buy_threshold, 1, np.where(test_predict < sell_threshold, -1, 0))
 test_data['strategy'] = test_data['prediction'] * test_data['returns']
 
-calculate_position_percentage(test_data, 0, 0.1)
+calculate_position_percentage(test_data, 0, 1.0)
 
 test_data['strategy_returns'] = test_data['returns'] * test_data['current_position_percentage']
 test_cumulative_returns = test_data[['returns', 'strategy_returns']].cumsum().apply(np.exp)
 
 buy_signals = test_data[test_data['prediction'] == 1].index
-#buy_signals[buy_signals.isin(cumulative_returns.index)]
 sell_signals = test_data[test_data['prediction'] == -1].index
 valid_buy_signals = [signal for signal in buy_signals if signal in test_cumulative_returns.index]
 valid_sell_signals = [signal for signal in sell_signals if signal in test_cumulative_returns.index]
 valid_buy_signals = pd.Index(valid_buy_signals)
 valid_sell_signals = pd.Index(valid_sell_signals)
+
 print(f"Number of valid buy signals: {len(valid_buy_signals)}")
 print(f"Number of valid sell signals: {len(valid_sell_signals)}")
 

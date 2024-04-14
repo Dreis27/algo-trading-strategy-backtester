@@ -95,11 +95,6 @@ def calculate_lags(data, rsi_lags, cols, column):
         data[col] = data[column].shift(lag)
         cols.append(col)
 
-# first testing dataset (1 month of 1h candles)
-#test_data = pd.read_csv('SOLUSDT-1h-2024-02.csv', index_col=0, parse_dates=True).dropna()
-#test_data.index = pd.to_datetime(test_data.index, unit='ms')
-#test_data = test_data.drop(['close_time', 'ignore', 'quote_volume', 'count', 'taker_buy_volume', 
- #                           'taker_buy_quote_volume', 'open', 'high', 'low'], axis=1)
 
 def add_indicators_to_training_data(data, cols, column='close'):
     """
@@ -107,8 +102,10 @@ def add_indicators_to_training_data(data, cols, column='close'):
 
     Parameters:
     - data: prepared DataFrame object with initial training data
+    - cols: list of columns which we use as input parameters for the neural network
     - column: the name of the column in data which contains the price data
     """
+
     data['returns'] = np.log(data[column] / data[column].shift(1)) 
     data['future_close'] = data[column].shift(1)
     data['future_return'] = np.log(data['future_close']/data[column])
@@ -158,6 +155,17 @@ def train_neural_network(training_data):
     return model
 
 def calculate_position_percentage(data, investment_percentage, position_size):
+    """
+    Adjusts and updates position sizes based on trading signals within a DataFrame.
+    
+    Parameters:
+    - data: The DataFrame containing trading signals and other relevant information.
+    - investment_percentage (float): Initial investment percentage, typically starts at 0.
+    - position_size (float): Size of each position as a percentage of the total portfolio.
+
+    Modifies the DataFrame in-place to add 'current_position_percentage' and 'portfolio_investment_percentage',
+    reflecting the current state of investment based on trading signals.
+    """
 
     portfolio_investment_percentage = investment_percentage
     position_size_percentage = position_size
@@ -167,7 +175,7 @@ def calculate_position_percentage(data, investment_percentage, position_size):
     for index, row in data.iterrows():
         signal = row['prediction']
         
-        # Check if adding another position exceeds the portfolio limit
+        # check if adding another position exceeds the portfolio limit
         if (signal == 1) & (portfolio_investment_percentage + position_size_percentage <= max_investment_limit):
 
             #if current_position_percentage<0:
@@ -182,14 +190,26 @@ def calculate_position_percentage(data, investment_percentage, position_size):
                 current_position_percentage -= position_size_percentage
                 portfolio_investment_percentage = portfolio_investment_percentage - position_size_percentage
         
-        # Store the updated position size percentage for each row
+        # store the updated position size percentage for each row
         data.at[index, 'current_position_percentage'] = current_position_percentage
         data.at[index, 'portfolio_investment_percentage'] = portfolio_investment_percentage
     
 
-def plot(strategy_and_returns_columns, buy_signals, sell_signals):
+def plot(strategy_and_returns, buy_signals, sell_signals):
+    """
+    Plots the trading strategy performance, including buy and sell signals, on a graph using cumulative returns data.
+
+    Parameters:
+    - strategy_and_returns (DataFrame): DataFrame containing the cumulative returns for 'returns' and 'strategy_returns'
+      calculated by applying an exponential function to the cumulative sum of log returns.
+    - buy_signals (Index): Pandas Index containing timestamps of buy signals where strategy returns should be marked.
+    - sell_signals (Index): Pandas Index containing timestamps of sell signals where strategy returns should be marked.
+
+    The function will display a line plot of the cumulative returns and overlay markers for buy and sell signals.
+    """
+    
     plt.figure(figsize=(16, 10))
-    strategy_and_returns_columns.plot(ax=plt.gca())
+    strategy_and_returns.plot(ax=plt.gca())
 
     # buy trades with green triangles and sell trades with red triangles
     # assuming '1' is a buy signal and '-1' is a sell signal
@@ -205,43 +225,30 @@ def plot(strategy_and_returns_columns, buy_signals, sell_signals):
     plt.legend()
     plt.show()
 
-if __name__ == "__main__":   
-    data = prepare_training_data('SOLUSDT-1h-2023-01.csv')
-    add_indicators_to_training_data(data, columns, 'close')
+def apply_trading_logic(data):
+    """
+    Applies basic trading logic to a DataFrame based on prediction signals.
+    
+    Parameters:
+    - data (DataFrame): The DataFrame containing prediction signals and other trading data.
+    
+    Updates the 'position' column in the DataFrame to reflect whether to hold a position based on predictions.
 
-    training_data = data.copy()
-    mu, std = training_data.mean(), training_data.std()
-    training_data_ = (training_data-mu)/ std
-
-    model = train_neural_network(training_data)
-    model.save('my_model.h5')
-    #res = pd.DataFrame(model.history.history)
-
-    model.evaluate(training_data_[columns], training_data['direction'])
-    predictions = model.predict(training_data_[columns])
-    predictions_series = pd.Series(predictions.flatten(), index=training_data.index)
-
-    training_data['prediction'] = np.where(predictions_series > buy_threshold, 1, np.where(predictions_series < sell_threshold, -1, 0))
-    #training_data['prediction'] = np.where(predictions > buy_threshold, 1, np.where(predictions < sell_threshold, -1, 0))
-
-    training_data['position'] = 0  # Initialize position column
-    last_position= 0
-
-    for index, row in training_data.iterrows():
+    """
+    training_data['position'] = 0 # initialize position column 
+    last_position = 0
+    for index, row in data.iterrows():
         current_prediction = row['prediction']
-        
-        # Directly get the scalar value for the current index's prediction
-        pred_value = predictions_series.loc[index]
+        pred_value = row['prediction']
+
         if isinstance(pred_value, pd.Series):
-            pred_value = pred_value.iloc[0]  # Ensuring a scalar value
-        
-        # Buy signal
+            pred_value = pred_value.iloc[0]  # ensuring a scalar value
+
         if current_prediction == 1:
             last_position = 1
-        # Sell signal
         elif current_prediction == -1:
             last_position = -1
-        # Evaluate closing conditions
+        
         """
         else:
             # Close long position based on the close_long_threshold
@@ -252,46 +259,66 @@ if __name__ == "__main__":
                 last_position = 0
         """
         
-        # Correctly apply the last_position to the current row
-        training_data.at[index, 'position'] = last_position
+        data.at[index, 'position'] = last_position
+    return data
 
-    training_data['strategy'] = training_data['prediction'] * training_data['returns']
+if __name__ == "__main__":
+
+    data = prepare_training_data('SOLUSDT-1h-2023-01.csv')
+    add_indicators_to_training_data(data, columns, 'close')
+
+    training_data = data.copy()
+    mu, std = training_data.mean(), training_data.std()
+    training_data_ = (training_data-mu)/ std
+
+    model = train_neural_network(training_data)
+    model.save('my_model.h5')
+
+    # neural network predictions
+    model.evaluate(training_data_[columns], training_data['direction'])
+    predictions = model.predict(training_data_[columns])
+    predictions_series = pd.Series(predictions.flatten(), index=training_data.index)
+
+    # determine prediction signals based on the neural network model
+    training_data['prediction'] = np.where(predictions_series > buy_threshold, 1, np.where(predictions_series < sell_threshold, -1, 0))
 
     calculate_position_percentage(training_data, 0, 1.0)
+    training_data = apply_trading_logic(training_data)
 
+    # calculate strategy log returns
+    training_data['strategy'] = training_data['prediction'] * training_data['returns']
+    # take into account the position percentage
     training_data['strategy_returns'] = training_data['returns'] * training_data['current_position_percentage']
 
-    # Convert strategy log returns to simple returns
+    # convert strategy log returns to simple returns
     training_data['strategy_simple_returns'] = np.exp(training_data['strategy_returns']) - 1
 
-    # Calculate cumulative simple returns and portfolio value
-    #training_data['cumulative_strategy_returns'] = (1 + training_data['strategy_simple_returns']).cumprod()
-    #training_data['portfolio_value'] = 1 * training_data['cumulative_strategy_returns']
     # cumulative returns for the strategy and the underlying asset
-    cumulative_returns = training_data[['returns', 'strategy_returns']].cumsum().apply(np.exp)
+    cumulative_returns = training_data[['returns', 'strategy_simple_returns']].cumsum().apply(np.exp)
 
+    # get buy/sell/close signals
     buy_signals = training_data[training_data['prediction'] == 1].index
     sell_signals = training_data[training_data['prediction'] == -1].index
     close_signals = training_data[training_data['position'] == 0].index
 
-    # Filter buy and sell signals to ensure they exist in cumulative_returns
+    # filter buy and sell signals to ensure they exist in cumulative_returns
     valid_buy_signals = [signal for signal in buy_signals if signal in cumulative_returns.index]
     valid_sell_signals = [signal for signal in sell_signals if signal in cumulative_returns.index]
     valid_close_signals = [signal for signal in close_signals if signal in cumulative_returns.index]
 
-    # Convert filtered signals back to a pandas Index or Series (if needed)
+    # convert filtered signals back to a pandas Index or Series
     valid_buy_signals = pd.Index(valid_buy_signals)
     valid_sell_signals = pd.Index(valid_sell_signals)
     valid_close_signals = pd.Index(valid_close_signals)
     #print(data.info())
-    buy_signal_values = cumulative_returns.loc[valid_buy_signals, 'strategy_returns']
-    sell_signal_values = cumulative_returns.loc[valid_sell_signals, 'strategy_returns']
+    buy_signal_values = cumulative_returns.loc[valid_buy_signals, 'strategy_simple_returns']
+    sell_signal_values = cumulative_returns.loc[valid_sell_signals, 'strategy_simple_returns']
 
-    # Debugging: Print lengths to check
+    # print numbers of buy/sell/close signals
     print(f"Number of valid buy signals: {len(valid_buy_signals)}")
     print(f"Number of valid sell signals: {len(valid_sell_signals)}")
     print(f"Number of valid close signals: {len(valid_close_signals)}")
     #print(training_data.loc[training_data['prediction']==-1, 'current_position_percentage'])
-    # plot cumulative returns
 
+    # plot cumulative returns
     plot(cumulative_returns, buy_signal_values, sell_signal_values)
